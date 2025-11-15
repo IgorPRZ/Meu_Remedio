@@ -15,8 +15,10 @@ namespace MR.Database
 
         public SQLiteRepository()
         {
+
             var dbPath = Path.Combine(FileSystem.AppDataDirectory, "mrdata.db3");
             _db = new SQLiteAsyncConnection(dbPath);
+            InitializeAsync();
         }
 
         public async Task InitializeAsync()

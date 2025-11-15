@@ -1,7 +1,8 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using MeuRemedio.Services;
+using Microsoft.Extensions.Logging;
 using MR.Database;
 using MR.Interface;
-using MR.Scheduler;
+using Plugin.LocalNotification;
 
 namespace MR
 {
@@ -12,6 +13,7 @@ namespace MR
             var builder = MauiApp.CreateBuilder();
             builder
                 .UseMauiApp<App>()
+                .UseLocalNotification()
                 .ConfigureFonts(fonts =>
                 {
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
@@ -27,8 +29,7 @@ namespace MR
             builder.Services.AddSingleton<ReminderScheduler>();
 
 
-            //var repo = app.Services.GetRequiredService<IRepository>() as SQLiteRepository;
-            //Task.Run(() => repo!.InitializeAsync()).Wait();
+     
 
             return builder.Build();
         }

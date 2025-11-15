@@ -1,13 +1,15 @@
-﻿using MR.Interface;
+﻿
+using MR.Interface;
 using MR.Model;
 using MR.Model.EnumFolder;
+using Plugin.LocalNotification;
+using Plugin.LocalNotification.AndroidOption;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
-namespace MR.Scheduler
+namespace MeuRemedio.Services
 {
     public class ReminderScheduler : IReminderScheduler
     {
@@ -20,16 +22,14 @@ namespace MR.Scheduler
             _clock = clock;
         }
 
-        // Gera instâncias futuras (não grava automaticamente no repo)
         public async Task<IEnumerable<Dose>> GenerateUpcomingDosesAsync(Guid medicineId, int daysAhead = 7)
         {
             var med = await _repo.GetMedicineAsync(medicineId)
-                      ?? throw new InvalidOperationException("Medicine not found");
+                      ?? throw new InvalidOperationException("Medicamento não encontrado.");
 
             var rules = (await _repo.GetRulesAsync(medicineId)).Where(r => r.Enabled);
-
             var now = _clock.Now;
-            var end = now.Date.AddDays(daysAhead).AddDays(1).AddTicks(-1);
+            var end = now.AddDays(daysAhead);
 
             var result = new List<Dose>();
 
@@ -38,7 +38,6 @@ namespace MR.Scheduler
                 DateTime cursor = now.Date;
                 while (cursor <= end)
                 {
-                    // valida janela de regra
                     if (rule.ValidFrom.HasValue && cursor.Date < rule.ValidFrom.Value.Date) { cursor = cursor.AddDays(1); continue; }
                     if (rule.ValidUntil.HasValue && cursor.Date > rule.ValidUntil.Value.Date) break;
 
@@ -55,15 +54,14 @@ namespace MR.Scheduler
                     }
                     else if (rule.Type == ReminderType.IntervalHours)
                     {
-                        // intervalo a partir do ValidFrom ou a partir do início do dia atual
-                        DateTime start = rule.ValidFrom ?? cursor.Date;
+                        DateTime start = rule.ValidFrom ?? now;
                         var s = start;
                         while (s <= end)
                         {
                             if (s >= now) result.Add(new Dose { MedicineId = med.Id, ScheduledAt = s });
                             s = s.AddHours(rule.IntervalHours);
                         }
-                        break; // já varremos todo intervalo globalmente
+                        break;
                     }
                     else if (rule.Type == ReminderType.Weekly)
                     {
@@ -77,12 +75,11 @@ namespace MR.Scheduler
                             }
                         }
                     }
-
                     cursor = cursor.AddDays(1);
                 }
             }
 
-            // ordenar e deduplicar por horário
+            // remove duplicatas e ordena
             var ordered = result
                 .GroupBy(d => d.ScheduledAt)
                 .Select(g => g.First())
@@ -92,21 +89,47 @@ namespace MR.Scheduler
             return ordered;
         }
 
-        // Essas duas operações devem ser implementadas com notificações nativas na app; aqui são stubs.
-        public Task ScheduleDoseNotificationAsync(Dose dose)
+        public async Task ScheduleDoseNotificationAsync(Dose dose)
         {
-            // TODO: integrar com plugin de notificações (dependendo da plataforma).
-            return Task.CompletedTask;
+            var med = await _repo.GetMedicineAsync(dose.MedicineId);
+            if (med == null) return;
+
+            var request = new NotificationRequest
+            {
+                NotificationId = dose.Id.GetHashCode(),
+                Title = $"Hora do remédio: {med.Name}",
+                Description = $"Tomar {med.Dosage} ({med.Form})",
+                Schedule = new NotificationRequestSchedule
+                {
+                    NotifyTime = dose.ScheduledAt,
+                    NotifyRepeatInterval = null
+                },
+                CategoryType = NotificationCategoryType.Alarm,
+                Android = new AndroidOptions
+                {
+                    Priority = AndroidPriority.High,
+                    VibrationPattern = new long[] { 0, 250, 250, 250 }
+                }
+            };
+
+            await LocalNotificationCenter.Current.Show(request);
         }
 
         public Task CancelDoseNotificationAsync(Guid doseId)
         {
-            // TODO: cancelar notificação nativa.
+            int notifId = doseId.GetHashCode();
+            LocalNotificationCenter.Current.Cancel(notifId);
             return Task.CompletedTask;
         }
     }
 
-    // Pequena abstração de relógio para facilitar testes
+    public interface IReminderScheduler
+    {
+        Task<IEnumerable<Dose>> GenerateUpcomingDosesAsync(Guid medicineId, int daysAhead = 7);
+        Task ScheduleDoseNotificationAsync(Dose dose);
+        Task CancelDoseNotificationAsync(Guid doseId);
+    }
+
     public interface ILocalClock { DateTime Now { get; } }
     public class SystemClock : ILocalClock { public DateTime Now => DateTime.Now; }
 }
